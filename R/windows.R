@@ -1,4 +1,8 @@
-make.windows <- function(gr, size = 1000, step = size, ...) {
+make.windows <- function(gr = NULL, size = 1000, step = size, ...) {
+	
+	if (inherits(gr, "Seqinfo")) {
+		gr <- as(gr, "GRanges")
+	}
 	
 	windowify <- function(g) {
 		

@@ -102,7 +102,7 @@ fetch.intensities <- function(ids, markers = NULL, chr = NULL, start = NULL, end
 	
 }
 
-fetch.samples <- function(ids = NULL, group = NULL, db = MMDB.PATH, by = c("name","id"), exact = TRUE, strict.case = TRUE, ...) {
+fetch.samples <- function(ids = NULL, group = NULL, db = MMDB.PATH, by = c("name","id"), exact = TRUE, strict.case = TRUE, verbose = TRUE, ...) {
 	
 	require(RSQLite)
 	stopifnot( !all(!is.null(ids), !is.null(group)) )
@@ -132,7 +132,9 @@ fetch.samples <- function(ids = NULL, group = NULL, db = MMDB.PATH, by = c("name
 	if (!strict.case)
 		sql <- paste0(sql, " COLLATE NOCASE")
 	sql <- paste0(sql, ";")
-	cat(sql, "\n")
+	
+	if (verbose)
+		cat(sql, "\n")
 	
 	.chunk.query(db, sql, -1)
 	
@@ -174,29 +176,22 @@ summarize.intensity <- function(df, markers = NULL, by = .(sid), ...) {
 	
 }
 
-fetch.genotype.matrix <- function(ids = NULL, markers = NULL, by, ...) {
+fetch.genotype.matrix <- function(ids = NULL, markers = NULL, by, verbose = TRUE, ...) {
 	
 	require(reshape2)
 	
-	ss <- fetch.samples(ids = ids, by = by, ...)
+	ss <- fetch.samples(ids = ids, by = by, verbose = verbose, ...)
 	mm <- data.frame()
 	if (!is.null(markers))
-		mm <- fetch.intensities(ids = ss$id, markers = markers, by = "id", ...)
+		mm <- fetch.intensities(ids = ss$id, markers = markers, by = "id", verbose = verbose, ...)
 	else
-		mm <- fetch.intensities(ids = ss$id, by = "id", ...)
+		mm <- fetch.intensities(ids = ss$id, by = "id", verbose = verbose, ...)
+	
+	if (!nrow(mm))
+		return(NULL)
 	
 	gty <- dcast(mm, marker + chr + pos ~ sid, value.var = "call")
 	gty <- gty[ with(gty, order(chr, pos)), ]
 	return(gty)
-	
-}
-
-geno.to.matrix <- function(gty, ...) {
-	
-	require(reshape2)
-	
-	gty.mat <- dcast(gty, marker + chr + pos ~ sid, value.var = "call")
-	gty.mat <- gty.mat[ with(gty.mat, order(chr, pos)), ]
-	return(gty.mat)
 	
 }
