@@ -30,11 +30,25 @@ convert.names <- function(chrs, to = c("ncbi","ensembl","ucsc","plink"), muga.st
 	
 }
 
-geno.to.matrix <- function(gty, ...) {
+geno.to.matrix <- function(gty, map = NULL, ...) {
 	
 	require(reshape2)
+
+	## if map specified, attach it to get cM positions
+	if (!is.null(map)) {
+		nsnps.before <- length(unique(gty$marker))
+		message(paste("Attaching map: started with", nsnps.before, "markers"))
+		gty <- merge(gty, map[ ,c("marker","cM") ])
+		nsnps.after <- length(unique(gty$marker))
+		message(paste("Done attaching map: ended with", nsnps.after, "markers"))
+	}
 	
-	gty.mat <- dcast(gty, marker + chr + pos ~ sid, value.var = "call")
+	## if genetic position included, keep it
+	fm <- "chr + marker + pos ~ sid"
+	if ("cM" %in% colnames(gty))
+		fm <- "chr + marker + cM + pos ~ sid"
+	
+	gty.mat <- dcast(gty, as.formula(fm), value.var = "call")
 	gty.mat <- gty.mat[ with(gty.mat, order(chr, pos)), ]
 	rownames(gty.mat) <- gty.mat$marker
 	return(gty.mat)
@@ -45,8 +59,11 @@ geno.to.matrix <- function(gty, ...) {
 	
 	if (!(is.matrix(gty) & mode(gty) == "character")) {
 		if (is.data.frame(gty)) {
-			warning("Input was dataframe; assuming its first 3 columns are marker-chr-pos and converting remainder to character")
-			return( as.matrix( gty[ ,-(1:3) ] ) )
+			cols <- 3
+			if ("cm" %in% tolower(colnames(gty)))
+				cols <- 4
+			message("Input was dataframe; assuming its first 3 (4) columns are chr-marker-(cM)-pos and converting remainder to character")
+			return( as.matrix( gty[ ,-(1:4) ] ) )
 		}
 		else
 			stop("Please supply a character matrix (markers x samples)")
@@ -184,9 +201,9 @@ geno.to.tped <- function(gty, map = NULL, nocalls = c("N"), het = "H", ...) {
 			stop("If supplying genotypes as matrix, must also supply a map.")
 	}
 	else if (is.data.frame(gty)) {
-		gty <- as.matrix(gty[ ,-(1:4) ])
 		if (is.null(map))
 			map <- gty[ ,1:4 ]
+		gty <- as.matrix(gty[ ,-(1:4) ])
 	}
 	else
 		stop("Must supply genotypes as either dataframe (including map) or matrix+map.")
@@ -209,6 +226,7 @@ geno.to.tped <- function(gty, map = NULL, nocalls = c("N"), het = "H", ...) {
 	}
 	## add marker map
 	rez <- data.frame(map, new.geno)
+	class(rez) <- c("tped", class(rez))
 	
 	return(rez)
 	
@@ -263,5 +281,167 @@ read.tped <- function(..., samples = NULL) {
 	if (length(samples) == ncol(newdf)-4)
 		colnames(newdf)[ 5:ncol(newdf) ] <- samples
 	return(newdf)
+	
+}
+
+.chr.greedy.ibd <- function(gty, pair, ...) {
+	
+	segstart <- NA
+	segend <- NA
+	n <- 0
+	segments <- matrix(nrow = 0, ncol = 3)
+	for (i in 1:nrow(gty)) {
+		
+		## ignore no-calls
+		if (any(gty[i,pair] == "N"))
+			next
+		
+		## het sites are ambiguous; be optimistic and assume the segment extends
+		if (any(gty[ i,pair ] == "H")) {
+			if (is.na(segstart))
+				segstart <- segend <- i
+			else
+				segend <- i
+			n <- n+1
+		}
+		
+		## IBS: segment definitely extends
+		if (gty[ i,pair[1] ] == gty[ i,pair[2] ]) {
+			if (is.na(segstart))
+				segstart <- segend <- i
+			else
+				segend <- i
+			n <- n+1
+		}
+		## definitely not IBS: terminate segment
+		else {
+			if (!is.na(segstart)) {
+				segments <- rbind(segments, c(segstart, segend, n))
+				segstart <- NA
+				segend <- NA
+				n <- 0
+			}
+		}
+		
+	} #end for
+	
+	return(segments)
+	
+}
+
+## use greedy algorithm to define maximal intervals of pairwise identity-by-descent 
+## <gty> = a matrix (character or numeric) of genotypes, assumed sorted by chr and pos
+## <map> = dataframe of marker,chr,pos,[cM] specifying marker locations
+## <pairs> = 2-col matrix of pairs over which to compute IBD, one row per pair
+greedy.ibd <- function(gty, map, pairs = t(combn(ncol(gty), 2)), ...) {
+	
+	require(plyr)
+	
+	if (!is.matrix(gty))
+		gty <- as.matrix(gty)
+	
+	segments <- data.frame(chr = character(), start = numeric(), end = numeric(), p1 = numeric(), p2 = numeric())
+	map$chr <- factor(map$chr)
+	for (c in levels(map$chr)) {
+		cat("--- chromosome:", c, "---\n")
+		i <- (map$chr == c)
+		for (p in 1:nrow(pairs)) {
+			cat("\t pair (", pairs[p,1], ",", pairs[p,2], ")\n")
+			rez <- .chr.greedy.ibd(gty[i,], pairs[p,])
+			print(head(rez))
+			segments <- rbind(segments,
+							  data.frame(chr = c,
+							  		   start = map$pos[ which(i)[rez[,1]] ], end = map$pos[ which(i)[rez[,2]] ],
+							  		   n = rez[,3], p1 = pairs[p,1], p2 = pairs[p,2]))
+		} 
+	}
+	
+	if (!is.null(colnames(gty))) {
+		segments$p1 <- colnames(gty)[ segments$p1 ]
+		segments$p2 <- colnames(gty)[ segments$p2 ]
+	}
+	
+	return(segments)
+	
+}
+
+## create a fake tfam-formatted pedigree file for plink
+spoof.tfam <- function(ids, sex = 0, ...) {
+	
+	resex <- 0
+	resex[ grepl("^[mM]", sex) ] <- 1
+	resex[ grepl("^[fF]", sex) ] <- 2
+	
+	fam <- data.frame(fid = seq_along(ids), id = seq_along(ids),
+					  pid = length(ids)+1, mid = length(ids)+2, sex = resex, phe = -9)
+	return(fam)
+	
+}
+
+## shortcut to write tab-separated output files without rownames, colnames, quotes
+write.plink.file <- function(...) {
+	write.table(..., col.names = FALSE, row.names = FALSE, quote = FALSE, sep = "\t")
+}
+
+## compute genome-wide IBD estimate (\hat{pi}) with plink, optionally with initial LD pruning step
+ibd.plink <- function(gty, map = NULL, ped = NULL, where = tempdir(), prefix = "stuff",
+					  flags = "--nonfounders", prune = FALSE, prune.by = "--make-founders --indep 50 5 2", ...) {
+	
+	require(Matrix)
+	
+	## check if plink installed
+	rez <- system("plink --version")
+	if (rez != 0) {
+		stop("Can't find plink executable; is it in your $PATH?")
+	}
+	
+	## convert input to tped, if it isn't
+	if (!inherits(gty, "tped"))
+		gty <- geno.to.tped(gty, map)
+	
+	nind <- sum(!(tolower(colnames(gty)) %in% c("chr","pos","cm","id","marker")))/2
+	gty <- subset(gty, !is.na(cM) & !is.na(pos) & pos > 0)
+	
+	if (is.null(ped))
+		ped <- spoof.tfam(1:nind)
+	
+	prefix <- file.path(where, prefix)
+	system(paste0("rm ", prefix, "*"))
+	
+	write.plink.file(ped, paste0(prefix, ".tfam"))
+	write.plink.file(gty, paste0(prefix, ".tped"))
+	
+	cmd <- paste("plink --tfile", prefix, "--make-bed --out", prefix)
+	system(cmd, intern = FALSE)
+	
+	if (prune) {
+		prefix.new <- paste0(prefix, ".pruned")
+		cmd <- paste("plink --bfile", prefix, prune.by, "--out", prefix.new)
+		system(cmd, intern = FALSE)
+		cmd <- paste("plink --bfile", prefix, "--extract", paste0(prefix.new, ".prune.in"), "--make-bed --out", prefix.new)
+		system(cmd, intern = FALSE)
+		if ( !file.exists(paste0(prefix.new, ".prune.in")) ) {
+			stop( paste("LD pruning failed; command was '", cmd,"'") )
+		}
+		else {
+	
+		}
+		prefix <- prefix.new
+	}
+	
+	cmd <- paste("plink --bfile", prefix, "--genome --out", prefix.new, flags)
+	rez <- system(cmd, intern = FALSE)
+	ibd.file <- paste0(prefix.new, ".genome")
+	if (file.exists(ibd.file)) {
+		ibd <- read.table(ibd.file, header = TRUE, strip.white = TRUE)
+		K <- matrix(NA, nrow = nind, ncol = nind)
+		for (i in 1:nrow(ibd)) {
+			K[ ibd$IID1[i], ibd$IID2[i] ] <- ibd$PI_HAT[i]
+		}
+		return(Matrix(K, sparse = TRUE))
+	}
+	else {
+		stop( paste0("Call to plink failed; command was: '",cmd,"'") )
+	}
 	
 }

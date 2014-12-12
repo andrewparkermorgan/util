@@ -36,7 +36,7 @@ ggply <- function(gr, ...) {
 	
 }
 
-wapply <- function(gr, windows, ...) {
+wapply <- function(gr, windows, fn, ..., unlist = TRUE) {
 	
 	require(plyr)
 	
@@ -44,11 +44,17 @@ wapply <- function(gr, windows, ...) {
 	grouped <- lapply(1:length(windows), function(w) {
 		gr[ olap$subjectHits[ olap$queryHits == w ] ]
 	})
+	#print(length(grouped[[1]]))
 	# print(class(grouped))
 	# .grl <- as(grouped, "GRangesList")
-	rez <- endoapply(grouped, ...)
-
-	values(windows) <- cbind(values(windows), data.frame(unlist(rez)))
-	return(windows)
+	rez <- endoapply(grouped, fn, ...)
+	
+	if (unlist) {
+		values(windows) <- cbind(values(windows), data.frame(unlist(rez)))
+		return(windows)
+	}
+	else {
+		return(rez)
+	}
 	
 }

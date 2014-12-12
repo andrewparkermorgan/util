@@ -158,7 +158,7 @@ fetch.controls <- function(..., db = c("mm","mda")) {
 		cat(sql, "\n")
 	
 	.chunk.query(db, sql, -1)
-	
+
 }
 
 .fetch.samples.mda <- function(ids = NULL, db = MDADB.PATH, by = c("name","id"), exact = TRUE, ...) {
@@ -217,7 +217,9 @@ fetch.controls <- function(..., db = c("mm","mda")) {
 	if (verbose)
 		cat(sql, "\n")
 	
-	.chunk.query(db, sql, batch.size)
+	rez <- .chunk.query(db, sql, batch.size)
+	rez$marker <- make.names(as.character(rez$marker))
+	return(rez)
 	
 }
 

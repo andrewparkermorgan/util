@@ -25,68 +25,83 @@ read.regions <- function(file, ...) {
 # allows for overlapping events; assumes intervals are HALF-OPEN by default (but this can be overridden)
 # <events> = GRanges of event intervals, or a dataframe coercible to same
 # <half.open> = assume intervals are half-open; if FALSE, they will be trimmed by 1 from the left
-integrate.events <- function(events, half.open = TRUE, weight.col = NULL, ...) {
-	
-	weighted <- !is.null(weight.col)
-	
-	if (is.data.frame(events)) {
-		# handle dataframe input gracefully, provided it is GRanges()-ish
-		gr <- with(events, GRanges(seqnames = Rle(seqnames),
-															 ranges = IRanges(start = start, end = end)) )
-		if (weighted) {
-			values(gr)[ ,weight.col ] <- events[ ,weight.col ]
-		}
-		events <- gr
-	}
-	
-	if (!half.open) {
-		start(events) <- start(events) + 1
-	}
-	
-	cat("Starting integration...\n")
-	
-	ldply(seqlevels(events), function(chr) {
-		
-		gr <- events[ seqnames(events) == chr ]
-		if ( !length(gr) ) return(NULL)
-		
-		if ( any(width(gr) == 0) ) {
-			stop("Interval widths not strictly positive: bad news.")
-		}
-		
-		pos <- sort(unique( c(start(gr), end(gr)) ))
-		# unique.gr <- GRanges(seqnames = chr, ranges = IRanges(start = pos[-length(pos)], end = pos[-1]))
-		# print(pos)
-		tally <- rep(0, length(pos))
-		for (i in 2:length(pos)) {
-			weights <- 1
-			right <- pos[i]
-			left <- pos[i-1]
-			overlapping.events <- gr[ start(gr) <= left & end(gr) >= right ]
-			denom <- (width(overlapping.events)-1)
-			if (weighted) {
-				weights <- values(overlapping.events)[ ,weight.col ]
-			}
-			delta <- sum( (right - left)*weights/(denom) )
-			tally[i] <- tally[i-1] + max(0, delta)
-			# print(paste(left, right))
-			# print(paste("Width of overlapping intervals:", paste(denom, collapse = ",")))
-			# if (length(overlapping.events) > 1) print(overlapping.events)
-			# print(paste("Additional density:", delta))
-			# print(paste("Running total:", tally[i]))
-			# print("----------")
-		}
-		
-		return( data.frame(seqnames = chr, pos = pos, cumsum = tally) )
-		
-	}, .progress = "text")
+# integrate.events <- function(events, half.open = TRUE, weight.col = NULL, ...) {
+# 	
+# 	weighted <- !is.null(weight.col)
+# 	
+# 	if (is.data.frame(events)) {
+# 		# handle dataframe input gracefully, provided it is GRanges()-ish
+# 		gr <- with(events, GRanges(seqnames = Rle(seqnames),
+# 															 ranges = IRanges(start = start, end = end)) )
+# 		if (weighted) {
+# 			values(gr)[ ,weight.col ] <- events[ ,weight.col ]
+# 		}
+# 		events <- gr
+# 	}
+# 	
+# 	if (!half.open) {
+# 		start(events) <- start(events) + 1
+# 	}
+# 	
+# 	cat("Starting integration...\n")
+# 	
+# 	ldply(seqlevels(events), function(chr) {
+# 		
+# 		gr <- events[ seqnames(events) == chr ]
+# 		if ( !length(gr) ) return(NULL)
+# 		
+# 		if ( any(width(gr) == 0) ) {
+# 			stop("Interval widths not strictly positive: bad news.")
+# 		}
+# 		
+# 		pos <- sort(unique( c(start(gr), end(gr)) ))
+# 		# unique.gr <- GRanges(seqnames = chr, ranges = IRanges(start = pos[-length(pos)], end = pos[-1]))
+# 		# print(pos)
+# 		tally <- rep(0, length(pos))
+# 		for (i in 2:length(pos)) {
+# 			weights <- 1
+# 			right <- pos[i]
+# 			left <- pos[i-1]
+# 			overlapping.events <- gr[ start(gr) <= left & end(gr) >= right ]
+# 			denom <- (width(overlapping.events)-1)
+# 			if (weighted) {
+# 				weights <- values(overlapping.events)[ ,weight.col ]
+# 			}
+# 			delta <- sum( (right - left)*weights/(denom) )
+# 			tally[i] <- tally[i-1] + max(0, delta)
+# 			# print(paste(left, right))
+# 			# print(paste("Width of overlapping intervals:", paste(denom, collapse = ",")))
+# 			# if (length(overlapping.events) > 1) print(overlapping.events)
+# 			# print(paste("Additional density:", delta))
+# 			# print(paste("Running total:", tally[i]))
+# 			# print("----------")
+# 		}
+# 		
+# 		return( data.frame(seqnames = chr, pos = pos, cumsum = tally) )
+# 		
+# 	}, .progress = "text")
+# 
+# }
 
+integrate.events <- function(events, ...) {
+	
+	strand(events) <- "*"
+	bins <- disjoin(events)
+	print(bins)
+	ol <- countOverlaps(bins, events)
+	weight <- width(bins)*ol
+	#print(head(ol, 100))
+	#print(length(events))
+	#print(length(bins))
+	
+	values(bins)$tally <- weight
+	btwn <- gaps(bins)
+	values(btwn)$tally <- 0
+	rez <- sort(c(btwn, bins))
+	values(rez)$cumsum <- cumsum(values(rez)$tally)
+	return(rez[ strand(rez) == "*" & as.vector(seqnames(rez)) %in% as.vector(seqnames(events)) ])
+	
 }
-
-# test integrate.events()
-tmp.gr <- GRanges(seqnames = Rle(c("chr1","chr1","chr1","chr2","chr2","chr2","chr2")),
-									ranges = IRanges(start = c(10, 11, 20, 1, 10, 20, 30), end = c(15, 16, 22, 10, 13, 25, 39)))
-df <- integrate.events(tmp.gr)
 
 ## pad.map() ##
 # utility for padding a cumulative map (eg. from integrate.events()) so that it covers appropriate region of chromosome
@@ -152,6 +167,11 @@ pad.map <- function(map, starts, ends, ...) {
 #		ddply(map, .(seqnames), make.density)
 make.density <- function(map, count.col = "cumsum", step = 100e3, window = 1000e3, ...) {
 	
+	if (!is.data.frame(map)) {
+		map <- as.data.frame(map)
+		map$pos <- map$start
+	}
+
 	rez <- NULL
 	if (nrow(map) > 1) {
 		
@@ -169,9 +189,6 @@ make.density <- function(map, count.col = "cumsum", step = 100e3, window = 1000e
 	return(rez)
 	
 }
-
-# test it
-df2 <- ddply(df, .(seqnames), make.density, step = 2, window = 5)
 
 ## .forward.sw() ##
 # [internal use only]
