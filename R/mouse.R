@@ -29,10 +29,14 @@ CC.COLORS <- c("#DAA520","#404040","#F08080","#1010F0","#00A0F0","#00A000","#F00
 mouse.colors <- setNames( c(CC.COLORS, "grey60","black"), c(cc.strains, "FVB/NJ","SPRET/EiJ") )
 
 ## standard colors for Mus taxa
-MUS.TAXA <- c("mus","dom","cas","molossinus",
+MUS.TAXA <- c("mus","dom","cas","musculus","domesticus","castaneus",
+			  "molossinus",
 			  "spretus","spicilegus","cypriacus","macedonicus",
-			  "famulus","caroli","pahari")
-MUS.COLORS <- c("#e41a1c", "#377eb8","#4daf4a","brown",
+			  "famulus","caroli","pahari",
+			  "cookii","fragilicauda")
+MUS.COLORS <- c("#e41a1c", "#377eb8","#4daf4a","#e41a1c", "#377eb8","#4daf4a",
+				"brown",
 				"grey40","cadetblue4","darkgoldenrod3","darkolivegreen",
-				"darkorange4","burlywood4","aquamarine4")
+				"darkorange4","burlywood4","aquamarine4",
+				"black","black")
 names(MUS.COLORS) <- c(MUS.TAXA)

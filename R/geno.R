@@ -63,7 +63,9 @@ geno.to.matrix <- function(gty, map = NULL, ...) {
 			if ("cm" %in% tolower(colnames(gty)))
 				cols <- 4
 			message("Input was dataframe; assuming its first 3 (4) columns are chr-marker-(cM)-pos and converting remainder to character")
-			return( as.matrix( gty[ ,-(1:4) ] ) )
+			rez <- as.matrix( gty[ ,-(1:cols) ] )
+			attr(rez, "map") <- gty[ ,1:cols ]
+			return(rez)
 		}
 		else
 			stop("Please supply a character matrix (markers x samples)")
@@ -160,6 +162,8 @@ recode.genotypes <- function(gty, alleles = c("A","C","G","T","H"), ...) {
 	rez <- t( apply(gty, 1, .recode.site) )
 	colnames(rez) <- colnames(gty)
 	rownames(rez) <- rownames(gty)
+	if ("map" %in% names(attributes(gty)))
+		attr(rez, "map") <- attr(gty, "map")
 	return(rez)
 	
 }
@@ -167,7 +171,7 @@ recode.genotypes <- function(gty, alleles = c("A","C","G","T","H"), ...) {
 ## convert genotypes (in matrix or datafame) to plink's tped format (markers x samples)
 ## <gty> = genotype matrix (markers x samples), or dataframe with map (see below) + genotypes
 ## <map> = dataframe with 4 columns: chr, marker, cM pos, bp pos
-geno.to.tped <- function(gty, map = NULL, nocalls = c("N"), het = "H", ...) {
+geno.to.tped <- function(gty, map = NULL, nocalls = c("N"), het = "H", resort = FALSE, ...) {
 	
 	.expand.numeric.geno <- function(col, ...) {
 		rez <- matrix(0, ncol = 2, nrow = length(col))
@@ -197,8 +201,12 @@ geno.to.tped <- function(gty, map = NULL, nocalls = c("N"), het = "H", ...) {
 	}
 	
 	if (is.matrix(gty)) {
-		if (is.null(map))
-			stop("If supplying genotypes as matrix, must also supply a map.")
+		if (is.null(map)) {
+			if ("map" %in% names(attributes(gty)))
+				map <- attr(gty, "map")
+			else
+				stop("If supplying genotypes as matrix, must also supply a map.")
+		}
 	}
 	else if (is.data.frame(gty)) {
 		if (is.null(map))
@@ -226,6 +234,8 @@ geno.to.tped <- function(gty, map = NULL, nocalls = c("N"), het = "H", ...) {
 	}
 	## add marker map
 	rez <- data.frame(map, new.geno)
+	if (resort)
+		rez <- rez[ order(rez[,1], rez[,3], rez[,4]), ]
 	class(rez) <- c("tped", class(rez))
 	
 	return(rez)
@@ -270,12 +280,23 @@ read.tped <- function(..., samples = NULL) {
 	df <- read.table(...)
 	colnames(df)[1:4] <- c("chr","marker","cM","pos")
 	newdf <- df[,1:4]
+	as.char <- FALSE
+	if (is.character(df[,5]) | is.factor(df[,5]))
+		as.char <- TRUE
+			
 	for (i in 0:((ncol(df)-4)/2-1)) {
 		is.het <- df[ ,5+2*i ] != df[ ,5+2*i+1 ]
-		newcol <- as.character(df[ ,5+2*i ])
-		newcol[is.het] <- "H"
+		if (as.char) {
+			newcol <- as.character(df[ ,5+2*i ])
+			newcol[is.het] <- "H"
+		}
+		else {
+			newcol <- df[ ,5+2*i ]
+			newcol[ newcol == 0 ] <- NA
+			newcol <- (newcol-1)*2
+			newcol[is.het] <- 1
+		}
 		newdf <- cbind(newdf, newcol)
-		
 	}
 	
 	if (length(samples) == ncol(newdf)-4)
@@ -414,6 +435,7 @@ ibd.plink <- function(gty, map = NULL, ped = NULL, where = tempdir(), prefix = "
 	cmd <- paste("plink --tfile", prefix, "--make-bed --out", prefix)
 	system(cmd, intern = FALSE)
 	
+	prefix.new <- prefix
 	if (prune) {
 		prefix.new <- paste0(prefix, ".pruned")
 		cmd <- paste("plink --bfile", prefix, prune.by, "--out", prefix.new)

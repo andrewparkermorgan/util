@@ -19,7 +19,7 @@ theme_phylo_blank <- function(family = "Helvetica", size = 12, face = "italic", 
 }
 
 get.tips <- function(t, ...) {
-	t$edge[ !(t$edge[,2] %in% t$edge[,1]),2]
+	t$edge[ !(t$edge[,2] %in% t$edge[,1]),2 ]
 }
 
 find.tip <- function(t, name, ...) {
@@ -47,6 +47,28 @@ get.parent <- function(t, node, ...) {
 	
 }
 
+## <http://blog.phytools.org/2012/01/function-to-get-descendant-node-numbers.html>
+get.descendants <- function(t, node, current = NULL, tips.only = TRUE, ...) {
+	
+	if(is.null(current))
+		current <- vector()
+	
+	daughters <- t$edge[ which(t$edge[,1] == node),2 ]
+	current <- c(current, daughters)
+	w <- which(daughters >= length(t$tip))
+	if(length(w)>0) {
+		for(i in 1:length(w)) {
+			current <- get.descendants(t, daughters[w[i]], current)
+		}
+	}
+	
+	if (tips.only)
+		return( current[ current %in% get.tips(t) ] )
+	else
+		return(current)
+	
+}
+
 is.root <- function(t, node, ...) {
 	!(node %in% t$edge[,2])
 }
@@ -59,7 +81,7 @@ traverse.up <- function(start, tree, time = Inf, dist = NULL, verbose = FALSE, .
 	
 	if (is.null(dist))
 		dist <- dist.nodes(t)
-		
+	
 	if (!is.root(t, start)) {
 		time <- abs(time)
 		last <- 0
