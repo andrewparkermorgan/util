@@ -25,8 +25,10 @@ mm10 <- Seqinfo(seqnames = paste0("chr", c(1:19, "X","Y","M")),
 CC.STRAINS <- toupper(letters[1:8])
 cc.strains <- c("A/J","C57BL/6J","129S1/SvImJ","NOD/ShiLtJ","NZO/HILtJ",
 								"CAST/EiJ","PWK/PhJ","WSB/EiJ")
-CC.COLORS <- c("#DAA520","#404040","#F08080","#1010F0","#00A0F0","#00A000","#F00000","#9000E0")
-mouse.colors <- setNames( c(CC.COLORS, "grey60","black"), c(cc.strains, "FVB/NJ","SPRET/EiJ") )
+CC.COLORS <- setNames( c("#DAA520","#404040","#F08080","#1010F0","#00A0F0","#00A000","#F00000","#9000E0"), CC.STRAINS )
+CC.COLORS <- c( CC.COLORS, setNames( rep("grey60",28), apply(combn(CC.STRAINS, 2), 2, paste, collapse = "") ) )
+mouse.colors <- c(CC.COLORS, setNames( c("grey40","grey20"), c("FVB/NJ","SPRET/EiJ") ))
+cc.colors <- setNames( c(CC.COLORS[1:8], CC.COLORS[c(5,1)]),  c(cc.strains, "NZO/HlLtJ","129S1SvlmJ") )
 
 ## standard colors for Mus taxa
 MUS.TAXA <- c("mus","dom","cas","musculus","domesticus","castaneus",
@@ -40,3 +42,40 @@ MUS.COLORS <- c("#e41a1c", "#377eb8","#4daf4a","#e41a1c", "#377eb8","#4daf4a",
 				"darkorange4","burlywood4","aquamarine4",
 				"black","black")
 names(MUS.COLORS) <- c(MUS.TAXA)
+
+## Sequence Ontology terms used by Sanger MGP
+SO.TERMS <- c(
+	"3_prime_UTR_variant",
+	"5_prime_UTR_variant",
+	"coding_sequence_variant",
+	"downstream_gene_variant",
+	"feature_elongation",
+	"feature_truncation",
+	"frameshift_variant",
+	"incomplete_terminal_codon_variant",
+	"inframe_deletion",
+	"inframe_insertion",
+	"initiator_codon_variant",
+	"intergenic_variant",
+	"intron_variant",
+	"mature_miRNA_variant",
+	"missense_variant",
+	"NMD_transcript_variant",
+	"nc_transcript_variant",
+	"non_coding_exon_variant",
+	"regulatory_region_ablation",
+	"regulatory_region_amplification",
+	"regulatory_region_variant",
+	"splice_acceptor_variant",
+	"splice_donor_variant",
+	"splice_region_variant",
+	"stop_gained",
+	"stop_lost",
+	"stop_retained_variant",
+	"synonymous_variant",
+	"TF_binding_site_variant",
+	"TFBS_ablation",
+	"TFBS_amplification",
+	"transcript_ablation",
+	"transcript_amplification",
+	"upstream_gene_variant" )

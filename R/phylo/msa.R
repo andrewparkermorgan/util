@@ -14,12 +14,90 @@ length.alignment <- function(a, ...) {
 	return(max(lens))
 }
 
+subset.alignment <- function(a, seqs, ...) {
+	
+	n <- 0
+	aa <- list(nam = character(), nb = 0, com = NA, seq = list())
+	for (s in seqs) {
+		i <- match(s, a$nam)
+		if (!is.na(i)) {
+			aa$nam <- c(aa$nam, s)
+			aa$seq <- c(aa$seq, a$seq[[i]])
+			aa$nb <- aa$nb + 1
+		}
+	}
+	class(aa) <- c("alignment", class(aa))
+	return(aa)
+	
+}
+
 slice <- function(a, i, ...) {
 	
 	newseq <- lapply(a$seq, function(x) paste(unlist(strsplit(x, ""))[ i ], collapse = ""))
 	#print(newseq)
 	a$seq <- newseq
 	return(a)
+	
+}
+
+slice2 <- function(a, ir, ...) {
+	
+	newseq <- lapply(a$seq, function(x) paste(unlist(strsplit(x, ""))[ (start(ir)[1]):(end(ir)[1]) ], collapse = ""))
+	#print(newseq)
+	a$seq <- newseq
+	return(a)
+	
+}
+
+.make.sdp <- function(x, ...) {
+	
+	code <- paste0(as.numeric(factor(x)), collapse = "")
+	nalleles <- length(unique(x))
+	return( list(code = code, nalleles = nalleles) )
+	
+}
+
+compatible.sdps <- function(x, y, strict = FALSE, ...) {
+	
+	if (is.character(y))
+		y <- as.numeric(strsplit(y, "")[[1]])
+	
+	compat <- TRUE
+	if (max(y) > 1 || strict) {
+		## pattern specified with 0,1,2: 0=ignore, 1=A1, 2=A2
+		light <- lapply(strsplit(as.character(x), ""), function(z) unique(z[ y == 1 ]))
+		dark <- lapply(strsplit(as.character(x), ""), function(z) unique(z[ y == 2 ]))
+		compat <- all(sapply(light, length) == 1) && all(sapply(dark, length) == 1)
+		compat <- compat && light[[1]][1] != dark[[1]][1]
+	}
+	else {
+		light <- lapply(strsplit(as.character(x), ""), function(z) unique(z[ y == 1 ]))
+		compat <- all(sapply(light, length) == 1)
+	}
+	
+	return(compat)
+	
+}
+
+beslice <- function(aln, ranges, ...) {
+	
+	if (!inherits(ranges, "IRanges"))
+		if (is.matrix(ranges) & ncol(ranges) >= 1) {
+			message("Coercing matrix input to IRanges.")
+			ranges <- IRanges(start = ranges[,1], end = ranges[,2])
+		}
+		else
+			stop("Please supply ranges as an IRanges object or a 2-column matrix.")
+	
+	ldply(1:length(ranges), function(i) {
+		alleles <- unlist(slice2(aln, ranges[i])$seq)
+		names(alleles) <- aln$nam
+		rez <- data.frame(id = i, start = start(ranges)[i], end = end(ranges)[i], seq = aln$nam, allele = alleles)
+		sdp <- .make.sdp(alleles)
+		rez$sdp <- sdp$code
+		rez$nalleles <- sdp$nalleles
+		return(rez)
+	})
 	
 }
 
@@ -32,13 +110,13 @@ windows <- function(a, size = 50*3, step = size, ...) {
 	
 }
 
-as.matrix.alignment <- function(a, ...) {
-	
-	seqlist <- sapply(a$seq, "[[", 1)
-	names(seqlist) <- a$nam
-	return( t(sapply(seqlist, .str.to.vector)) )
-	
-}
+#as.matrix.alignment <- function(a, ...) {
+#	
+#	seqlist <- sapply(a$seq, "[[", 1)
+#	names(seqlist) <- a$nam
+#	return( t(sapply(seqlist, .str.to.vector)) )
+#	
+#}
 
 pct.gaps <- function(a, ...) {
 	amat <- as.matrix(a)
@@ -86,5 +164,36 @@ project <- function(seq, coords, gap.char = c("-"), ...) {
 	coords.adj <- starts[where] + offset - 1
 	
 	return(coords.adj)
+	
+}
+
+## compute omega = E[Ka/Ks] for an alignment; return matrix with rows/cols reordered by hclust
+calc.omega <- function(aln, ...) {
+	
+	## trim alignment to multiple of 3
+	trimby <- length(aln) %% 3
+	if (trimby > 0)
+		warning("Trimming alignment to length divisible by 3; is it really a codon alignment?")
+	aln <- slice(aln, 1:(length(aln)-trimby))
+	
+	K <- kaks(aln)
+	.kaks <- as.matrix(with(K, ka/ks))
+	.kaks[ !is.finite(.kaks) | abs(.kaks) > 10 ] <- NA
+	o <- hclust(dist(.kaks))$order
+	.kaks <- .kaks[ o,o ]
+	attr(.kaks, "order") <- o
+	return(.kaks)
+	
+}
+
+find.variable.ranges <- function(aln, ...) {
+	
+	if (inherits(aln, "alignment"))
+		aln <- as.matrix.alignment(aln)
+	
+	var <- as.integer(unname(apply(aln, 2, function(x) length(unique(toupper(x))) > 1)))
+	rl <- Rle(var)
+	i <- runValue(rl) == 1
+	IRanges( start = start(rl)[i], end = end(rl)[i] )
 	
 }

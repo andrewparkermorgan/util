@@ -171,14 +171,14 @@ make.density <- function(map, count.col = "cumsum", step = 100e3, window = 1000e
 		map <- as.data.frame(map)
 		map$pos <- map$start
 	}
-
+	
 	rez <- NULL
 	if (nrow(map) > 1) {
 		
 		start <- seq(min(map$pos), max(map$pos) - window, step)
 		end <- start + window
 		# print(cbind(start, end))
-	
+		
 		events.start <- .chrInterpolateFromBp(map[ ,c("pos",count.col) ], start)
 		events.end <- .chrInterpolateFromBp(map[ ,c("pos",count.col) ], end)
 		
@@ -234,11 +234,11 @@ make.excursion <- function(map, density.col = "density", theta = 100) {
 	# compute the forward pass
 	map <- .forward.sw(map, "e.score")
 	return(map)
-
+	
 }
 
 # test it
-make.excursion(df2)
+#make.excursion(df2)
 
 ## get.peaks() ##
 # extract best segment(s) from an excursion plot
@@ -252,8 +252,10 @@ make.excursion(df2)
 # <score.col> = column name holding enrichment scores (for use with .forward.sw())
 #
 # return value is a dataframe suitable for conversion to a GRanges, with columns "seqnames","start","end","E"
-get.peaks <- function(map, minscore = 10, score.col = "e.score") {
+get.peaks <- function(map, minscore = 10, score.col = "e.score", ...) {
 	
+	map <- as.data.frame(makeGRangesFromDataFrame(map, keep.extra.columns = TRUE, ...))
+	print(head(map))
 	peaks <- NULL
 	E <- map$E
 	while(max(E) > minscore) {
@@ -261,7 +263,7 @@ get.peaks <- function(map, minscore = 10, score.col = "e.score") {
 		# find index of the maximum excursion
 		E <- map$E
 		idx.end <- max(which(E == max(E)))
-
+		
 		# find the last zero preceeding the max index
 		zero.list <- which(E[1:idx.end] == 0)
 		idx.start <- ifelse( length(zero.list) == 0, 1, max(zero.list) )
@@ -270,10 +272,10 @@ get.peaks <- function(map, minscore = 10, score.col = "e.score") {
 		tmp <- cbind( map[ idx.start,c("seqnames","pos") ], map[ idx.end,c("pos","E") ] )
 		names(tmp) <- c("seqnames","start","end","E")
 		peaks <- rbind(peaks, tmp)
-
+		
 		#reset the scores to zero
 		map[ idx.start:idx.end,score.col ] <- 0
-
+		
 		print("found a peak; going again...")
 		# recompute the forward pass
 		map <- .forward.sw(map, score.col)
@@ -287,5 +289,5 @@ get.peaks <- function(map, minscore = 10, score.col = "e.score") {
 	}
 	
 	return(peaks)
-
+	
 }
