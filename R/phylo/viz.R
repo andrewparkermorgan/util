@@ -83,11 +83,20 @@ plot.omega <- function(aln, ...) {
 
 ## draw phylogenetic trees with ggplot2
 ## 	with thanks to the phyloseq package (https://github.com/joey711/phyloseq)
-ggplot.phylo <- function(phy, data = NULL, type = "default", label.tips = TRUE, use.edge.length = TRUE, spread = 0.1, ...) {
+ggplot.phylo <- function(phy, data = NULL, type = "default", label.tips = TRUE, label.nodes = FALSE, label.by = "taxa",
+						 use.edge.length = TRUE, spread = 0.1, lab.offset = 0.02, lab.size = 3, justify = FALSE,
+						 root.age = NULL, expand = c(0.2, 0), ...) {
 	
 	require(ggplot2)
+	require(scales)
+	require(grid)
 	require(ape)
 	require(plyr)
+	
+	## function to return node IDs for tips, *in current tree order*
+	.get.tips <- function(t, ...) {
+		t$edge[ !(t$edge[,2] %in% t$edge[,1]),2 ]
+	}
 	
 	## define some function calls to ape internals
 	ape_node_height <- function(Ntip, Nnode, edge, Nedge, yy){
@@ -118,29 +127,34 @@ ggplot.phylo <- function(phy, data = NULL, type = "default", label.tips = TRUE, 
 	ROOT <- Ntip + 1
 	TIPS <- phy$edge[(phy$edge[, 2] <= Ntip), 2]
 	NODES <- (ROOT):(Ntip + Nnode)
+	nodelabels <- phy$node.label
 	
 	## use ape internals to compute start and end positions of edges
 	if (use.edge.length)
-	xx <- ape_node_depth_edge_length(Ntip, Nnode, z$edge, Nedge, z$edge.length)
+		xx <- ape_node_depth_edge_length(Ntip, Nnode, z$edge, Nedge, z$edge.length)
 	else {
-		xx <- ape_node_depth(Ntip, Nnode, z$edge, Nedge, 1) - 1
-		xx <- max(xx) - xx
+		z$edge.length <- rep(1, length(z$edge.length))
+		#xx <- ape_node_depth(Ntip, Nnode, z$edge, Nedge, 1) - 1
+		#xx <- max(xx) - xx
+		xx <- ape_node_depth_edge_length(Ntip, Nnode, z$edge, Nedge, z$edge.length)
 	}
 	yy <- numeric(Ntip + Nnode)
 	yy[TIPS] <- 1:Ntip
 	yy <- ape_node_height(Ntip, Nnode, z$edge, Nedge, yy)
-	eps <- max(xx)*0.02
+	eps <- max(xx)*lab.offset
 	
 	tdf <- data.frame(phy$edge, taxa = NA)
-	tdf$taxa[ tdf$X2 <= Ntip ] <- as.character(phy$tip.label)
+	tl <- phy$tip.label[ .get.tips(phy) ]
+	tdf$taxa[ tdf$X2 <= Ntip ] <- tl
 	tdf$xleft <- xx[ tdf$X1 ]
 	tdf$xright <- xx[ tdf$X2 ]
 	tdf$y <- yy[ tdf$X2 ]
 	tdf$eps <- eps
+		
 	edf <- ddply(tdf, .(X1), summarize,
 				 x = xleft[1], vmin = min(y), vmax = max(y))
 	
-	## position terminal nodes
+	## position internal nodes
 	if (!is.null(phy$node.label)) {
 		tdf$x <- NA
 		tdf$x[ tdf$X2 > ROOT ] <- tdf$xright[ tdf$X2 > ROOT ]
@@ -150,7 +164,11 @@ ggplot.phylo <- function(phy, data = NULL, type = "default", label.tips = TRUE, 
 	
 	## set angles for text
 	ymax <- (1+spread)*max(tdf$y, na.rm = TRUE)
+	tdf$hj <- 0
 	tdf$angle <- with(tdf, -90-360/ymax * y)
+	idx <- tdf$angle > -270 & tdf$angle < -90
+	tdf$angle[idx] <- 180+tdf$angle[idx]
+	tdf$hj[!idx] <- 1
 	
 	## merge in node data
 	if (!is.null(data))
@@ -158,24 +176,45 @@ ggplot.phylo <- function(phy, data = NULL, type = "default", label.tips = TRUE, 
 	nodes <- subset(tdf, !is.na(taxa))
 	
 	if (type == "fan") {
-		node.aes <- aes(angle = angle, label = taxa, x = xright + eps)
-		hj <- 1
+		if (!justify)
+			node.aes <- aes_string(angle = "angle", hjust = "hj", label = label.by, x = "xright + eps")
+		else
+			node.aes <- aes_string(angle = "angle", hjust = "hj", label = label.by, x = "max(xright)+eps")
 	}
 	else {
-		node.aes <- aes(label = taxa, x = xright + eps)
-		hj <- 0
+		if (justify)
+			xpos = "max(xright)+eps"
+		else
+			xpos = "xright + eps"
+		node.aes <- aes_string(label = label.by, hjust = 0, x = xpos)
 	}
 		
 	## make base plot
-	print(head(tdf))
+	#print(tdf)
+	#print(nodes)
 	p <- ggplot(tdf, aes(x = xright, y = y)) +
 		geom_segment(aes(x = xleft, xend = xright, y = y, yend = y)) +
 		geom_segment(data = edf, aes(x = x, xend = x, y = vmin, yend = vmax)) +
 		scale_y_continuous(limits = c(0, ymax), expand = c(0, 1))
 	
-	if (label.tips)
-		p <- p + geom_text(data = nodes, node.aes, hjust = hj, size = 3)
-		
+	if (label.tips) {
+		p <- p + geom_text(data = tdf[ !is.na(tdf[,label.by]), ], node.aes, size = lab.size)
+		if (justify)
+			p <- p + geom_segment(data = nodes,
+								  aes(x = xright, xend = max(xright)-0.01*max(xright), y = y, yend = y),
+								  colour = "grey70", size = 0.1)
+	}
+	
+	if (label.nodes) {
+		node.aes <- aes_string(x = "xright + 1.8*eps", label = "label", size = lab.size, hjust = 0)
+		p <- p + geom_text(data = tdf[ !is.na(tdf[,"label"]), ], node.aes, size = 0.75*lab.size, col = "grey50")
+	}
+	
+	if (!is.null(root.age))
+		p <- p + scale_x_continuous(breaks = seq(0, max(tdf$xright, na.rm = TRUE), length.out = 5),
+									labels = function(x) root.age - root.age*x/max(tdf$xright, na.rm = TRUE),
+									expand = expand)
+	
 	if (type == "fan")
 		p <- p + coord_polar("y")
 	

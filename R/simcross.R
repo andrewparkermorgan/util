@@ -9,6 +9,7 @@ library(plyr)
 outbred.from.founders <- function(nfounders = 8, npairs = nfounders/2, ngen = 2,
 								  design = c("nosib","random"), ...) {
 	
+	#message("simulating outbred pedigree stub")
 	stopifnot(nfounders %% 2 == 0)
 	stopifnot(npairs > 0)
 	design <- match.arg(design)
@@ -24,8 +25,8 @@ outbred.from.founders <- function(nfounders = 8, npairs = nfounders/2, ngen = 2,
 	
 	for (i in 1:ngen) {
 		
-		while (design == "nosib" && any(dads - moms == 1)) {
-			# sample until no sibs
+		while (design == "nosib" && any(dads - moms == 1) && gen > 1) {
+			message("resampling dads")
 			dads <- sample(dads)
 		}
 		kids <- 1:(npairs*2)+max(id)
@@ -59,7 +60,7 @@ draw.next.generation <- function(ped, npairs = 20, design = c("nosib","random"),
 	dads <- sample(dads, npairs, replace = (npairs > length(dads)))
 	
 	while (design == "nosib" && any(dads - moms == 1)) {
-		# sample until no sibs
+		#message("resampling dads")
 		dads <- sample(dads)
 	}
 	
@@ -159,9 +160,11 @@ sim.until.fix <- function(ped, target = 1.0, maxgen = Inf, ...) {
 	
 	fixed <- FALSE
 	lost <- FALSE
+	#message("simulating initial pedigree")
 	geno <- sim_from_pedigree(ped)
 	gen <- max(ped[,5])
 	while (!(fixed || lost) && gen < maxgen) {
+		#message("generation ", gen)
 		ped.next <- draw.next.generation(ped, ...)
 		geno.next <- sim.next.generation(ped, ped.next, geno, ...)
 		maf <- sum(allele.copies(geno.next, ...))
@@ -192,8 +195,10 @@ allele.copies <- function(geno, pos = 50, founders = 1, sexless = TRUE, ...) {
 ## run = list with elements 'ped'=pedigree, 'geno'=chromosomes (as simulated by simcross::sim_from_pedigree())
 summarise.run <- function(run, founders = 1, pos = 50, ...) {
 	
+	#message("summarizing run")
 	run$ped <- transform(as.data.frame(run$ped), x = allele.copies(run$geno, pos = pos, founders = founders))
 	summ <- ddply(run$ped, .(gen), summarize, maf = sum(x)/(2*length(x)) )
+	#message("done summary")
 	summ$fixed <- run$fixed
 	summ$lost <- run$lost
 	summ$ngen <- run$gen

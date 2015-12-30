@@ -17,6 +17,11 @@ parser.add_argument("phased", type = argparse.FileType("rU"),
 					help = "output file from fastPHASE" )
 args = parser.parse_args()
 
+def plinkify(x):
+	if x == "?":
+		x = 0
+	return str(int(x))
+
 ## read phased genotypes
 cols = []
 for line in args.phased:
@@ -37,5 +42,5 @@ args.map.seek(0)
 markers = csv.reader(args.map, snf)
 i = 0
 for line in markers:
-	print " ".join(line[0:4]), " ".join([ g[i] for g in cols ])
+	print " ".join(line[0:4]), " ".join([ plinkify(g[i]) for g in cols ])
 	i += 1

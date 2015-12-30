@@ -200,7 +200,7 @@ gghaploview <- function(ld, ...) {
 	
 }
 
-gghaploview2 <- function(ld, min.r2 = 0.1, colours = c("lightyellow","yed"), gridlines = NA, ...) {
+gghaploview2 <- function(ld, min.r2 = 0.1, dprime = FALSE, colours = c("lightyellow","red"), gridlines = NA, ...) {
 	
 	require(data.table)
 	if (!is.data.table(ld))
@@ -226,7 +226,10 @@ gghaploview2 <- function(ld, min.r2 = 0.1, colours = c("lightyellow","yed"), gri
 		jj <- as.character(ld$SNP_B)
 		x <- as.numeric(mk[ ii,o ]) + corners[i,1]
 		y <- as.numeric(mk[ jj,o ]) + corners[i,2]
-		r2 <- ld$R2
+		if (dprime)
+			r2 <- ld$DP
+		else
+			r2 <- ld$R2
 		id <- 1:nrow(ld)
 		polys <- data.table(x = x, y = y, r2 = r2, id = id, marker = jj, corner = i)
 		allpolys <- rbind(allpolys, polys)

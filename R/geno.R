@@ -45,16 +45,23 @@ geno.to.matrix <- function(gty, map = NULL, use.names = "id", by = "marker", mak
 	require(reshape2)
 
 	## if map specified, attach it to get cM positions
-	if (!is.null(map)) {
+	if (.is.valid.map(map)) {
 		rownames(map) <- as.character(map$marker)
 		if ("cM" %in% colnames(gty))
 			gty[ ,cM := NULL ]
+		if ("chr" %in% colnames(gty))
+			gty[ ,chr := NULL ]
+		if ("pos" %in% colnames(gty))
+			gty[ ,pos := NULL ]
 		if (make.names)
 			gty$marker <- make.names(gty$marker)
 		before <- unique(gty$marker)
 		nsnps.before <- length(unique(gty$marker))
+		.map <- data.table(map[ ,c("chr","marker","cM","pos") ])
+		setkey(.map, "marker")
+		setkey(gty, "marker")
 		message(paste("Attaching map: started with", nsnps.before, "markers"))
-		gty <- merge(gty, map[ ,c("marker","cM") ], by = by)
+		gty <- gty[.map]
 		nsnps.after <- length(unique(gty$marker))
 		message(paste("Done attaching map: ended with", nsnps.after, "markers"))
 		if (nsnps.before != nsnps.after) {
@@ -93,7 +100,9 @@ geno.to.matrix <- function(gty, map = NULL, use.names = "id", by = "marker", mak
 
 }
 
-`[.genotypes` <- function(x, i, j, ...) {
+## do some operator overloading
+
+`[.genotypes` <- function(x, i = TRUE, j = TRUE, drop = FALSE, ...) {
 	
 	r <- NextMethod("[")
 	if (!is.null(attr(x, "map"))) {
@@ -104,8 +113,8 @@ geno.to.matrix <- function(gty, map = NULL, use.names = "id", by = "marker", mak
 		rownames(attr(r, "ped")) <- as.character(attr(r, "ped")$iid)
 	}
 	if (.has.valid.intensity(x)) {
-		x.new <- attr(x, "intensity")$x[ i,j ]
-		y.new <- attr(x, "intensity")$y[ i,j ]
+		x.new <- attr(x, "intensity")$x[ i,j, drop = FALSE ]
+		y.new <- attr(x, "intensity")$y[ i,j, drop = FALSE ]
 		attr(r, "intensity") <- list(x = x.new, y = y.new)
 		if (!is.null(attr(x, "normalized")))
 			attr(r, "normalized") <- attr(x, "normalized")
@@ -123,6 +132,40 @@ geno.to.matrix <- function(gty, map = NULL, use.names = "id", by = "marker", mak
 	return(r)
 }
 
+`$.genotypes` <- function(x, expr, ...) {
+	
+	attributes(x)[[expr]]
+	
+}
+
+
+## set some S3 generics for useful accessor functions
+
+markers <- function(x) UseMethod("markers")
+markers.genotypes <- function(gty, ...) {
+	attr(gty, "map")
+}
+
+samples <- function(x) UseMethod("samples")
+samples.genotypes <- function(gty, ...) {
+	if (!is.null(attr(gty, "ped")))
+		attr(gty, "ped")
+	else
+		colnames(gty)
+}
+
+filters <- function(x) UseMethod("filters")
+filters.genotypes <- function(gty, ...) {
+	get.filters(gty, ...)
+}
+
+intensity <- function(x) UseMethod("intensity")
+intensity.genotypes <- function(gty, ...) {
+	attr(gty, "intensity")
+}
+
+## add a method to overload subset() on a genotypes object which
+## preserves attributes (markers, samples, intensity...)
 subset.genotypes <- function(gty, expr, by = c("markers","samples"), ...) {
 
 	if (!inherits(gty, "genotypes"))
@@ -150,13 +193,124 @@ subset.genotypes <- function(gty, expr, by = c("markers","samples"), ...) {
 
 }
 
+## overload cbind() to join not only genotype matrix but also sample metadata
+## NB: intensities and filters are dropped at this point
+cbind.genotypes <- function(a, b, ...) {
+	
+	if (!inherits(b, "genotypes"))
+		stop("Only willing to bind two objects of class 'genotypes.'")
+	
+	if (nrow(a) != nrow(b) | any(rownames(a) != rownames(b)))
+		stop("Number and names of markers don't match.  Try merging genotypes instead of cbind-ing.")
+	
+	message(paste0("Adding ",ncol(b)," individuals to the existing ",ncol(a),"."))
+	
+	rez <- cbind(unclass(a), unclass(b))
+	class(rez) <- c("genotypes", class(rez))
+	if (!is.null(attr(a, "map")))
+		attr(rez, "map") <- attr(a, "map")
+	if (!is.null(attr(a, "ped")))
+		attr(rez, "ped") <- rbind( attr(a, "ped"), attr(b, "ped") )
+	
+	return(rez)
+	
+}
+
+## overload rbind() to join not only genotype matrix but also marker metadata
+## NB: intensities and filters are dropped at this point
+rbind.genotypes <- function(a, b, ...) {
+	
+	if (!inherits(b, "genotypes"))
+		stop("Only willing to bind two objects of class 'genotypes.'")
+	
+	cols.a <- colnames(a)
+	cols.b <- colnames(b)
+	if (length(setdiff(a,b)) || length(setdiff(b,a)))
+		stop("Number and names of markers don't match.  Try merging genotypes instead of cbind-ing.")
+	
+	message(paste0("Adding ",nrow(b)," markers to the existing ",nrow(a),"."))
+	
+	rez <- rbind(unclass(a)[ ,cols.a ], unclass(b)[ ,cols.a ])
+	class(rez) <- c("genotypes", class(rez))
+	if (!is.null(attr(a, "ped")))
+		attr(rez, "ped") <- attr(a, "ped")
+	if (!is.null(attr(a, "map")) & !is.null(attr(b, "map")))
+		attr(rez, "map") <- rbind( attr(a, "map"), attr(b, "map") )
+	
+	return(rez)
+	
+}
+
+## add a method to overload merge(), again keeping attributes
+merge.genotypes <- function(a, b, join = c("inner","left"), ...) {
+	
+	if (!inherits(b, "genotypes"))
+		stop("Only willing to merge two objects of class 'genotypes.'")
+	
+	if (length(intersect(colnames(a), colnames(b))))
+		stop("Some samples are shared: that merge isn't implemented yet.")
+	
+	if (mode(a) != mode(b))
+		stop("The two objects appear to have different modes (character vs. numeric).")
+	
+	if (!is.null(attr(a, "alleles"))) {
+		if (!is.null(attr(b, "alleles"))) {
+			if (attr(b, "alleles") != attr(a, "alleles"))
+				warning("Alleles are coded differently in the two datasets; consider fixing that before merging.")
+		}
+	}
+	
+	o <- setNames( 1:nrow(a), rownames(a) )
+	keep <- intersect(rownames(a), rownames(b))
+	if (!length(keep))
+		stop("No shared markers; result would be empty.")
+	
+	message(paste0("Set A has ", nrow(a), " markers x ", ncol(a), " samples."))
+	message(paste0("Set B has ", nrow(b), " markers x ", ncol(b), " samples."))
+	
+	join <- match.arg(join)
+	new.o <- keep[ order(o[keep]) ]
+	if (join == "inner") {
+		## keep intersection of marker sets
+		rez <- cbind( unclass(a)[ new.o, ],
+					  unclass(b)[ new.o, ] )
+		if (.has.valid.intensity(a) && .has.valid.intensity(b)) {
+			attr(rez, "intensity") <- list( x = cbind(attr(a, "intensity")$x[ new.o, ], attr(b, "intensity")$x[ new.o, ]),
+											y = cbind(attr(a, "intensity")$y[ new.o, ], attr(b, "intensity")$y[ new.o, ]) )
+			attr(rez, "normalized") <- .null.false(attr(a, "normalized")) && .null.false(attr(a, "normalized"))
+		}
+	}
+	else
+		stop("Not yet implemented: merges other than 'inner join'.")
+	
+	message(paste0("Merged set has ", nrow(rez), " markers x ", ncol(rez), " samples."))
+	
+	## add class info
+	class(rez) <- c("genotypes", class(rez))
+	
+	## merge markers and family information
+	if (!is.null(attr(a, "map")))
+		attr(rez, "map") <- attr(a, "map")[ keep[ order(o[keep]) ], ]
+	if (!is.null(attr(a, "ped")) & !is.null(attr(b, "ped")))
+		attr(rez, "ped") <- rbind(attr(a, "ped"), attr(b, "ped"))
+	
+	return(rez)
+	
+}
+
+## internal helpers for validating the 'genotypes' data structure and its parts
+
+.is.valid.map <- function(map, ...) {
+	return( all(colnames(map)[1:4] == c("chr","marker","cM","pos")) )
+}
+
 .has.valid.map <- function(gty, ...) {
 
 	map <- attr(gty, "map")
 	rez <- FALSE
 
 	if (!is.null(map))
-		rez <- all(colnames(map)[1:4] == c("chr","marker","cM","pos"))
+		rez <- .is.valid.map(map)
 	if (is.na(rez))
 		rez <- FALSE
 
@@ -171,6 +325,7 @@ subset.genotypes <- function(gty, expr, by = c("markers","samples"), ...) {
 	
 }
 
+## convert NULLs to FALSE (mostly in calls to attr(x,"not.here"))
 .null.false <- function(x) {
 	
 	if (is.null(x))
@@ -190,106 +345,6 @@ subset.genotypes <- function(gty, expr, by = c("markers","samples"), ...) {
 	
 	return(rez)
 	
-}
-
-cbind.genotypes <- function(a, b, ...) {
-
-	if (!inherits(b, "genotypes"))
-		stop("Only willing to bind two objects of class 'genotypes.'")
-
-	if (nrow(a) != nrow(b) | any(rownames(a) != rownames(b)))
-		stop("Number and names of markers don't match.  Try merging genotypes instead of cbind-ing.")
-
-	message(paste0("Adding ",ncol(b)," individuals to the existing ",ncol(a),"."))
-
-	rez <- cbind(unclass(a), unclass(b))
-	class(rez) <- c("genotypes", class(rez))
-	if (!is.null(attr(a, "map")))
-		attr(rez, "map") <- attr(a, "map")
-	if (!is.null(attr(a, "ped")))
-		attr(rez, "ped") <- rbind( attr(a, "ped"), attr(b, "ped") )
-
-	return(rez)
-
-}
-
-rbind.genotypes <- function(a, b, ...) {
-
-	if (!inherits(b, "genotypes"))
-		stop("Only willing to bind two objects of class 'genotypes.'")
-
-	cols.a <- colnames(a)
-	cols.b <- colnames(b)
-	if (length(setdiff(a,b)) || length(setdiff(b,a)))
-		stop("Number and names of markers don't match.  Try merging genotypes instead of cbind-ing.")
-
-	message(paste0("Adding ",nrow(b)," markers to the existing ",nrow(a),"."))
-
-	rez <- rbind(unclass(a)[ ,cols.a ], unclass(b)[ ,cols.a ])
-	class(rez) <- c("genotypes", class(rez))
-	if (!is.null(attr(a, "ped")))
-		attr(rez, "ped") <- attr(a, "ped")
-	if (!is.null(attr(a, "map")) & !is.null(attr(b, "map")))
-		attr(rez, "map") <- rbind( attr(a, "map"), attr(b, "map") )
-
-	return(rez)
-
-}
-
-merge.genotypes <- function(a, b, join = c("inner","left"), ...) {
-
-	if (!inherits(b, "genotypes"))
-		stop("Only willing to merge two objects of class 'genotypes.'")
-
-	if (length(intersect(colnames(a), colnames(b))))
-		stop("Some samples are shared: that merge isn't implemented yet.")
-
-	if (mode(a) != mode(b))
-		stop("The two objects appear to have different modes (character vs. numeric).")
-	
-	if (!is.null(attr(a, "alleles"))) {
-		if (!is.null(attr(b, "alleles"))) {
-			if (attr(b, "alleles") != attr(a, "alleles"))
-				warning("Alleles are coded differently in the two datasets; consider fixing that before merging.")
-		}
-	}
-		
-	o <- setNames( 1:nrow(a), rownames(a) )
-	keep <- intersect(rownames(a), rownames(b))
-	if (!length(keep))
-		stop("No shared markers; result would be empty.")
-
-	message(paste0("Set A has ", nrow(a), " markers x ", ncol(a), " samples."))
-	message(paste0("Set B has ", nrow(b), " markers x ", ncol(b), " samples."))
-
-	join <- match.arg(join)
-	new.o <- keep[ order(o[keep]) ]
-	if (join == "inner") {
-		## keep intersection of marker sets
-		rez <- cbind( unclass(a)[ new.o, ],
-					  unclass(b)[ new.o, ] )
-		if (.has.valid.intensity(a) && .has.valid.intensity(b)) {
-			attr(rez, "intensity") <- list( x = cbind(attr(a, "intensity")$x[ new.o, ], attr(b, "intensity")$x[ new.o, ]),
-											y = cbind(attr(a, "intensity")$y[ new.o, ], attr(b, "intensity")$y[ new.o, ]) )
-			attr(rez, "normalized") <- .null.false(attr(a, "normalized")) && .null.false(attr(a, "normalized"))
-		}
-	}
-	else
-		stop("Not yet implemented: merges other than 'inner join'.")
-
-	message(paste0("Merged set has ", nrow(rez), " markers x ", ncol(rez), " samples."))
-
-	## add class info
-	class(rez) <- c("genotypes", class(rez))
-
-	## merge markers and family information
-	if (!is.null(attr(a, "map")))
-		attr(rez, "map") <- attr(a, "map")[ keep[ order(o[keep]) ], ]
-	if (!is.null(attr(a, "ped")) & !is.null(attr(b, "ped")))
-		attr(rez, "ped") <- rbind(attr(a, "ped"), attr(b, "ped"))
-
-	return(rez)
-
 }
 
 ## apply a function over samples in a genotype matrix, by sample groups

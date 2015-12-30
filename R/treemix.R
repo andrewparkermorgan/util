@@ -9,10 +9,11 @@ make.treemix <- function(prefix, outfile = paste0(as.character(prefix), ".treemi
 	require(reshape2)
 	
 	if (1) {
-		cmd <- paste0("--freq counts --family --out ", prefix)
-		freqfile <- paste0(prefix, ".frq.strat")
-		success <- .plink.command(prefix, cmd, list(freqfile))
-		if (!success)
+		cmd <- paste0("--freq counts --family")
+		success <- .plink.command(prefix, cmd, list("frq.strat"))
+		if (is.character(success))
+			freqfile <- paste0(success, ".frq.strat")
+		else
 			stop("Attempt to compute allele frequencies failed.")	
 	}
 	
@@ -22,6 +23,7 @@ make.treemix <- function(prefix, outfile = paste0(as.character(prefix), ".treemi
 	minors <- acast(freq, SNP ~ CLST, value.var = "MAC")
 	majors <- totals - minors
 	
+	print(outfile)
 	out <- gzfile(outfile)
 	open(out, "w")
 	on.exit(close(out))

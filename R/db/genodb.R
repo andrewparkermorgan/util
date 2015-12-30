@@ -150,11 +150,46 @@ fetch.controls <- function(..., db = c("mm","mda","giga")) {
 
 	if (db == "mm")
 		.fetch.controls.mm(...)
-	if (db == "giga")
+	else if (db == "giga")
 		.fetch.controls.giga(...)
 	else
 		stop("Control samples only defined for MegaMUGA, GigaMUGA so far.")
 
+}
+
+fetch.markers <- function(..., db = c("mm","mda","giga")) {
+	
+	if (db == "giga")
+		.fetch.markers.giga(...)
+	else
+		stop("Marker manifest only works for GigaMUGA so far.")
+	
+}
+
+
+.fetch.markers.giga <- function(chr = NULL, start = NULL, end = NULL, db = GIGADB.PATH, ...) {
+	
+	require(RSQLite)
+	db <- dbConnect(SQLite(), dbname = db)
+	
+	sql <- paste("SELECT id as id, name as marker, chromosome as chr, position38 as pos_mm10, position37 as pos_mm9\n",
+				 "FROM snps")
+	
+	if (!is.null(chr))
+		sql <- paste0(sql, "\nWHERE chromosome = '", chr, "'")
+	if (!is.null(start))
+		sql <- paste0(sql, "\nAND (position37 >= ", start, " OR position38 >= ", start, ")")
+	if (!is.null(end))
+		sql <- paste0(sql, "\nAND (position37 <= ", end, " OR position38 <= ", end, ")")
+	sql <- paste(sql, ";\n")
+	
+	cat(sql)
+	rez <- .chunk.query(db, sql, -1)
+	if (nrow(rez) > 0)
+		colnames(rez) <- c("id","marker","chr","pos","pos.mm9")
+	
+	return(rez)
+	
 }
 
 ## array-specific functions
@@ -296,7 +331,7 @@ fetch.controls <- function(..., db = c("mm","mda","giga")) {
 
 # }
 
-.fetch.intensities.python <- function(ids, markers = NULL, chr = NULL, start = NULL, end = NULL, pos.col = "position38",
+.fetch.intensities.python <- function(ids, markers = NULL, chr = NULL, start = NULL, end = NULL, pos.col = "position38", raw = FALSE,
 									by = c("id","name"), operation = "intensities", db = MMDB.PATH, mda = FALSE, script = "~/lib/util/db/genodb.py", ... ) {
 
 	require(data.table)
@@ -314,13 +349,15 @@ fetch.controls <- function(..., db = c("mm","mda","giga")) {
 	if (!is.null(markers))
 		cmd <- paste0(cmd, " --markers ", mm.id)
 	if (!is.null(chr))
-		cmd <- paste0(cmd, " --chr ", chr)
+		cmd <- paste0(cmd, " --chr ", paste(chr, collapse = " "))
 	if (!is.null(start))
 		cmd <- paste0(cmd, " --from-bp ", formatC(start, format = "d"))
 	if (!is.null(end))
 		cmd <- paste0(cmd, " --to-bp ", formatC(end, format = "d"))
 	cmd <- paste0(cmd, " --pos ", pos.col)
-
+	if (raw)
+		cmd <- paste(cmd, "--raw")
+	
 	cat(cmd)
 	system(cmd)
 	rez <- fread(ff)
@@ -519,4 +556,50 @@ summarize.intensity <- function(..., db = c("mm","mda")) {
 	ddply(df, by, summarize,
 		  si = sum(average), n = length(x))
 
+}
+
+## construct an argyle::genotypes object from csbio db query
+make.genotypes <- function(ids, snps = NULL, by = c("name","id"), keep.intensity = TRUE, rename = TRUE, make.names.markers = FALSE, ...) {
+	
+	if (is.null(snps))
+		stop("Must provide a marker map as 'snps'.")
+	by <- match.arg(by)
+	
+	ss <- fetch.samples(ids = ids, by = by, ...)
+	rownames(ss) <- as.character(ss$id)
+	ss$iid <- make.unique(ss$name)
+	
+	intens <- fetch.intensities(ids = ss$id, by = "id", ...)
+	if (make.names.markers) {
+		message("Forcing marker names to be R-acceptable...")
+		intens[ ,marker := make.names(marker) ]
+	}
+	
+	calls <- argyle:::.raw.to.matrix(intens, snps, sample.id.col = "sid", value.col = "call")
+	if (keep.intensity) {
+		x <- argyle:::.raw.to.matrix(intens, snps, sample.id.col = "sid", value.col = "x")
+		y <- argyle:::.raw.to.matrix(intens, snps, sample.id.col = "sid", value.col = "y")
+	}
+	else {
+		intens <- NULL
+	}
+	
+	i <- colnames(calls)
+	if (rename)
+		nn <- ss[ i,"iid" ]
+	else
+		nn <- i
+	if (keep.intensity) {
+		colnames(calls) <- colnames(x) <- colnames(y) <- nn
+		intens <- list(x = x, y = y)
+	}
+	else
+		colnames(calls) <- nn
+	fam <- argyle:::make.fam(nn, sex = ss[ i,"sex" ], fid = i)
+	
+	g <- argyle:::genotypes(calls, snps, fam,
+							intensity = intens,
+							alleles = "native")
+	return(g)
+	
 }

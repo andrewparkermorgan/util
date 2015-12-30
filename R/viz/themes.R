@@ -62,6 +62,13 @@ theme_clean <- function(legend.pos = c("outside","topright", "topleft", "bottomr
 
 }
 
+theme_clean_grid <- function(...) {
+	
+	theme_clean(...) %+replace% theme(panel.grid.major = element_line(colour = "grey90", size = 0.2),
+									  panel.grid.minor = element_line(colour = "grey98", size = 0.5))
+	
+}
+
 ## clean theme with x-axis only
 theme_clean_xonly <- function(...) {
 	
@@ -98,7 +105,7 @@ scale_fill_heatmap <- function(...) {
 
 ## create a grob with a text label (like for labelling a plot panel),
 ##	suitable for placement with grid.arrange()
-panel.label.grob <- function(label, pos = c("topleft","topright"),
+panel.label.grob <- function(label, pos = c("topleft","topright","bottomcenter","topcenter"),
 							 y = 0.9, x = 0, hjust = 0, vjust = 1, ...) {
 	
 	pos <- match.arg(pos)
@@ -109,6 +116,18 @@ panel.label.grob <- function(label, pos = c("topleft","topright"),
 	else if (pos == "topleft") {
 		x <- 0.9
 		hjust <- 1
+	}
+	else if (pos == "bottomcenter") {
+		y <- unit(0.05, "npc")
+		x <- unit(0.5, "npc")
+		hjust <- 0.5
+		vjust <- 0
+	}
+	else if (pos == "topcenter") {
+		y <- unit(0.95, "npc")
+		x <- unit(0.5, "npc")
+		hjust <- 0.5
+		vjust <- 1
 	}
 	
 	grid.text(label, x = x, y = y, hjust = hjust, vjust = vjust, gp = gpar(...), draw = FALSE)

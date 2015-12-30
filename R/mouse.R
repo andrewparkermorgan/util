@@ -21,6 +21,11 @@ mm10 <- Seqinfo(seqnames = paste0("chr", c(1:19, "X","Y","M")),
 								isCircular = c(rep(FALSE, 21),TRUE),
 								genome = "mm10")
 
+## pseudoautosomal regions
+# first coordinate is CAST/EiJ 'extended PAR', second is normal PAR
+PAR.mm9 <- c(165980013,166.41e6)
+PAR.mm10 <- c(169542082,169969759)
+
 ## standard colours for Collaborative Cross strains
 CC.STRAINS <- toupper(letters[1:8])
 cc.strains <- c("A/J","C57BL/6J","129S1/SvImJ","NOD/ShiLtJ","NZO/HILtJ",

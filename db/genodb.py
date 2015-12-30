@@ -34,8 +34,10 @@ parser.add_argument(	"--exact", action = "store_true",
 parser.add_argument(	"--mda", action = "store_true",
 						default = False,
 						help = "assume the schema of the MDA database from Jax" )
-parser.add_argument(	"--chr", type = str,
-						required = False,
+parser.add_argument(	"--raw", action = "store_true",
+						default = False,
+						help = "use raw rather than normalized intensities" )
+parser.add_argument(	"--chr", type = str, nargs = "*",
 						help = "which chromosome" )
 parser.add_argument(	"--from-bp", type = int,
 						required = False,
@@ -124,21 +126,28 @@ elif args.operation == "intensities":
 
 	if not args.mda:
 
+		
+		xfield = "x"
+		yfield = "y"
+		if args.raw:
+			xfield = "xraw"
+			yfield = "yraw"
 		fields = ["marker","sid","id","chr","pos","x","y","call"]
 		sql =	"SELECT m.name as marker, s.id as sid, s.name as id, m.chromosome as chr, \
-				m.{} as pos, g.x, g.y, g.call \
+				m.{} as pos, g.{}, g.{}, g.call \
 				FROM samples as s \
 				INNER JOIN _mysamples as sg ON s.id = sg.id \
 				INNER JOIN genotypes as g ON g.sampleID = s.id \
-				INNER JOIN snps as m on g.snpID = m.id ".format(args.pos)
+				INNER JOIN snps as m on g.snpID = m.id ".format(args.pos, xfield, yfield)
 
 		if args.markers:
 			markers = read_ids(args.markers)
+			print markers
 			colname = insert_samples(conn, markers, table = "_mymarkers")
 			sql = sql + "INNER JOIN _mymarkers as mym ON m.{} = mym.{} ".format(colname, colname)
 
 		if args.chr:
-			sql = sql + "WHERE chr = '{}' ".format(args.chr)
+			sql = sql + "WHERE " + " OR ".join([ "m.chromosome = '{}'".format(c) for c in args.chr ]) + " "
 
 		if args.from_bp:
 			sql = sql + "AND pos >= {} ".format(args.from_bp)
@@ -171,7 +180,7 @@ elif args.operation == "intensities":
 			sql = sql + "INNER JOIN _mymarkers as mym ON m.{} = mym.{} ".format(args.by, args.by)
 
 		if args.chr:
-			sql = sql + "WHERE m.chrID = '{}' ".format(args.chr)
+			sql = sql + "WHERE " + " OR ".join([ "m.chrID = '{}'".format(c) for c in args.chr ]) + " "
 
 		if args.from_bp:
 			sql = sql + "AND m.positionBp >= {} ".format(args.from_bp)
